@@ -3,6 +3,99 @@
   <head>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ar-js-org/ar.js@3.4.2/aframe/build/aframe-ar.min.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; } /* Previene scrollbars */
+    </style>
+    <script>
+      AFRAME.registerComponent('follow-and-freeze', {
+        schema: {
+          markerId: { type: 'string', default: '' } // ID del marcador a seguir
+        },
+
+        init: function () {
+          console.log('Componente follow-and-freeze inicializado.');
+
+          this.marker = document.querySelector(this.data.markerId);
+          this.model = this.el; // La entidad con el gltf-model
+
+          if (!this.marker) {
+            console.error('ERROR: No se encontró el marcador con ID:', this.data.markerId);
+            return;
+          }
+
+          this.isTracking = false; // Indica si el marcador está actualmente visible y estamos rastreando
+          this.initialModelRotApplied = false; // Para aplicar la rotación inicial del modelo solo una vez
+
+          // Oculta el modelo al inicio
+          this.model.object3D.visible = false;
+          console.log('Modelo inicialmente oculto.');
+
+          // Variables para almacenar la última pose conocida del modelo
+          this.lastKnownPosition = new THREE.Vector3();
+          this.lastKnownQuaternion = new THREE.Quaternion();
+
+          // Escucha los eventos del marcador
+          this.marker.addEventListener('markerFound', () => {
+            console.log('Evento markerFound disparado. Empezando a seguir.');
+            this.isTracking = true;
+            this.model.object3D.visible = true; // Asegúrate de que el modelo sea visible
+            // Al encontrar el marcador, actualizamos la posición del modelo inmediatamente
+            // y lo hacemos hijo del marcador TEMPORALMENTE para que AR.js lo mueva.
+            // Opcional: Re-parentar aquí podría causar un pequeño "salto" si el modelo se movió mucho
+            // sin el marcador. La estrategia es no re-parentar y manejar la pose manualmente.
+          });
+
+          this.marker.addEventListener('markerLost', () => {
+            console.log('Evento markerLost disparado. Congelando posición.');
+            this.isTracking = false;
+            // Cuando el marcador se pierde, el modelo YA está en su última posición
+            // porque lo hemos estado actualizando en el tick. Simplemente dejamos de actualizarlo.
+          });
+        },
+
+        tick: function () {
+          // Solo actualizamos la posición del modelo si el marcador está siendo rastreado
+          if (this.isTracking) {
+            // ... (dentro de if (this.isTracking) en el tick) ...
+
+            // Obtiene solo la posición del marcador
+            const markerWorldPosition = new THREE.Vector3();
+            this.marker.object3D.matrixWorld.decompose(
+              markerWorldPosition,
+              new THREE.Quaternion(), // No necesitamos la rotación del marcador
+              new THREE.Vector3()
+            );
+
+            // Aplica la posición del marcador al modelo
+            this.model.object3D.position.copy(markerWorldPosition);
+
+            // Define una rotación ABSOLUTA en el mundo para el modelo.
+            // Esto significa que el modelo siempre estará orientado de esta manera,
+            // sin importar cómo gire el marcador.
+            const worldFixedRotation = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(
+                    THREE.MathUtils.degToRad(-18), // Rotación fija en X en el mundo
+                    THREE.MathUtils.degToRad(15),   // Rotación fija en Y en el mundo
+                    THREE.MathUtils.degToRad(0),   // Rotación fija en Z en el mundo
+                    'XYZ'
+                )
+            );
+            this.model.object3D.quaternion.copy(worldFixedRotation); // Usar copy, no multiply
+
+            // ... (código para lastKnownPosition y lastKnownQuaternion) ...
+            this.lastKnownPosition.copy(this.model.object3D.position);
+            this.lastKnownQuaternion.copy(this.model.object3D.quaternion);
+
+          } else {
+            // Si el marcador no está siendo rastreado, el modelo permanece en su lastKnownPosition.
+            // No necesitamos hacer nada en el tick en este caso, ya que el modelo ya se detuvo.
+            // Aseguramos que el modelo esté en la última posición conocida
+            this.model.object3D.position.copy(this.lastKnownPosition);
+            this.model.object3D.quaternion.copy(this.lastKnownQuaternion);
+          }
+        }
+      });
+    </script>
   </head>
   <body style="margin: 0;">
     <a-scene
@@ -10,15 +103,21 @@
       embedded
       arjs="sourceType: webcam; debugUIEnabled: false;"
     >
-    <!-- Marcador tipo Hiro -->
-    <a-marker type="pattern" url="image/STG.patt">
-        <a-entity 
-            gltf-model="modelos/logo.glb"
-            scale="0.5 0.5 0.5"
-            position="0 0 0"
-            rotation="-80 0 0">
-        </a-entity>
-    </a-marker>
+      <a-marker
+        id="my-marker" type="pattern"
+        url="image/STG.patt"
+        emitevents="true"
+        registerevents
+      >
+        </a-marker>
+
+      <a-entity
+        id="ar-model"
+        gltf-model="modelos/logo.glb"
+        scale="0.5 0.5 0.5"
+        position="0 0 0" rotation="0 0 0" follow-and-freeze="markerId: #my-marker"
+      >
+      </a-entity>
 
       <a-entity camera></a-entity>
     </a-scene>
